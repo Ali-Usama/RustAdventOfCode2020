@@ -1,6 +1,4 @@
-
-use std::fmt;
-use std::fmt::{Formatter, write};
+use std::{fmt, fmt::{Formatter, write}, ops::AddAssign};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Vec2 {
@@ -131,20 +129,51 @@ impl From<(i64, i64)> for Vec2 {
     }
 }
 
+impl AddAssign for Vec2 {
+    fn add_assign(&mut self, rhs: Self) {
+        self.x += rhs.x;
+        self.y += rhs.y;
+    }
+}
+
 fn main() {
     let map = Map::parse(include_bytes!("./input.txt"));
     dbg!(map.size);
-    let itinerary = (0..map.size.y).into_iter()
-        .map(|y| Vec2::from((y*3, y)));
-    let num_trees = itinerary
-        .filter(|&pos| map.get(pos) == Tile::Tree).count();
-    println!("Trees: {}", num_trees);
+    // from the problem statement
+    let deltas: &[Vec2] = &[
+        (1, 1).into(),
+        (3, 1).into(),
+        (5, 1).into(),
+        (7, 1).into(),
+        (1, 2).into(),
+    ];
+    let answer = deltas.iter()
+        .copied()
+        .map(|delta| generate_itinerary(&map, delta))  // generate all itineraries
+        .map(|itin| {   // count trees
+            itin.into_iter()
+                .filter(|&pos| map.get(pos) == Tile::Tree)
+                .count()
+        })
+        .product::<usize>();  // multiply everything together
+    println!("Answer: {}", answer);
+}
+
+fn generate_itinerary(map: &Map, delta: Vec2) -> Vec<Vec2> {
+    let mut pos = Vec2::from((0, 0));
+    let mut res: Vec<_> = Default::default();
+
+    while map.normalize_pos(pos).is_some() {
+        res.push(pos);
+        pos += delta;
+    }
+    res
 }
 
 
 #[cfg(test)]
 mod tests {
-    use super::{Vec2, Map};
+    use super::{Vec2, Map, generate_itinerary};
 
     #[test]
     fn test_tuple() {
@@ -172,5 +201,43 @@ mod tests {
         assert_eq!(m.index((2, 0).into()), Some(2));
         assert_eq!(m.index((0, 1).into()), Some(3));
         assert_eq!(m.index((2, 1).into()), Some(5));
+    }
+
+    #[test]
+    fn test_generate_itinerary() {
+        assert_eq!(
+            &generate_itinerary(&Map::new((5, 5).into()), (1, 1).into()),
+            &[
+                (0, 0).into(),
+                (1, 1).into(),
+                (2, 2).into(),
+                (3, 3).into(),
+                (4, 4).into(),
+            ],
+            "right 1 down 1, 5x5 map"
+        );
+
+        assert_eq!(
+            &generate_itinerary(&Map::new((5, 5).into()), (3, 1).into()),
+            &[
+                (0, 0).into(),
+                (3, 1).into(),
+                (6, 2).into(),
+                (9, 3).into(),
+                (12, 4).into(),
+            ],
+            "right 3 down 1, 5x5 map"
+        );
+
+        assert_eq!(
+            &generate_itinerary(&Map::new((5, 5).into()), (2, 2).into()),
+            &[(0, 0).into(), (2, 2).into(), (4, 4).into(), ],
+            "right 2 down 2, 5x5 map"
+        );
+        assert_eq!(
+            &generate_itinerary(&Map::new((9, 9).into()), (2, 5).into()),
+            &[(0, 0).into(), (2, 5).into(), ],
+            "right 2 down 5, 9x9 map"
+        )
     }
 }
