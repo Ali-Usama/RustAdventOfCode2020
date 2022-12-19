@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 #[derive(PartialEq, Debug)]
 struct PasswordPolicy {
     byte: u8,
-    range: RangeInclusive<usize>,
+    positions: [usize; 2],
 }
 
 fn main() -> anyhow::Result<()> {
@@ -55,25 +55,24 @@ fn parse_line(s: &str) -> anyhow::Result<(PasswordPolicy, &str)> {
         )
     };
 
-    let range = (min.parse()?)..=(max.parse()?);
+    let positions= [min.parse::<usize>().unwrap() - 1, max.parse::<usize>().unwrap() - 1];
 
-    println!("{}: {}, {}", policy, min, max);
+    // let range = (min.parse()?)..=(max.parse()?);
+
+    println!("{}: {}, {}, {}", policy, min, max, password);
 
     Ok((PasswordPolicy {
-        range,
+        positions,
         byte,
     }, password))
 }
 
 impl PasswordPolicy {
     fn is_valid(&self, password: &str) -> bool {
-        self.range.contains(
-            &password
-                .as_bytes().iter()
-                .copied()
-                .filter(|&b| b == self.byte)
-                .count(),
-        )
+        self.positions.iter()
+            .copied()
+            .filter(|&index| password.as_bytes()[index] == self.byte)
+            .count() == 1
     }
 }
 
@@ -91,13 +90,13 @@ mod tests {
     #[test]
     fn test_is_valid() {
         let pp = PasswordPolicy {
-            range: 1..=3,
+            positions: [0, 2],
             byte: b'a',
         };
-        assert_eq!(pp.is_valid("zeus"), false, "no 'a's");
-        assert_eq!(pp.is_valid("hades"), true, "single 'a's");
-        assert_eq!(pp.is_valid("banana"), true, "three 'a's");
-        assert_eq!(pp.is_valid("aaaah"), false, "too many 'a's");
+        assert_eq!(pp.is_valid("abcde"), true, "'a' in position 1");
+        assert_eq!(pp.is_valid("bcade"), true, "'a' in position 3");
+        assert_eq!(pp.is_valid("food"), false, "no 'a' whatsoever");
+        assert_eq!(pp.is_valid("abacus"), false, "'a' in both positions");
     }
 
     #[test]
@@ -106,7 +105,7 @@ mod tests {
             parse_line("1-3 a: banana").unwrap(),
             (
                 PasswordPolicy {
-                    range: 1..=3,
+                    positions: [1, 3],
                     byte: b'a',
                 }, "banana"
             )
