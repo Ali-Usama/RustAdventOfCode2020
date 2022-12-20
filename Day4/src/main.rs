@@ -1,4 +1,4 @@
-use peg::*;
+use std::ops::RangeInclusive;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Year(
@@ -50,6 +50,9 @@ struct PassportBuilder<'a> {
 enum Error {
     #[error("missing field: {0}")]
     MissingField(&'static str),
+
+    #[error("could not parse {0}: {1}")]
+    ParseError(String, String),
 }
 
 impl<'a> PassportBuilder<'a> {
@@ -101,7 +104,7 @@ impl<'a> PassportBuilder<'a> {
     }
 
     /// A parser that parses only one record
-    fn parse(input: &'a str) -> Self {
+    fn parse(input: &'a str) -> Result<Self, Error> {
         let mut b: Self = Default::default();
 
         peg::parser! {
@@ -118,34 +121,58 @@ impl<'a> PassportBuilder<'a> {
                     / hcl(b) / ecl(b)               // colors
                     / pid(b) / cid(b)               // IDs
 
-                rule byr(b: &mut PassportBuilder<'input>)
-                    = "byr:" year:year() {
-                    b.birth_year = Some(year)
+                rule byr(b: &mut PassportBuilder<'input>) -> ()
+                    = "byr:" year:year((1920..=2002)) {
+                    b.birth_year = Some(year);
                 }
 
-                rule iyr(b: &mut PassportBuilder<'input>)
-                    = "iyr:" year:year() { b.issue_year = Some(year) }
+                rule iyr(b: &mut PassportBuilder<'input>) -> ()
+                    = "iyr:" year:year((2010..=2020)) { b.issue_year = Some(year); }
 
-                rule eyr(b: &mut PassportBuilder<'input>)
-                    = "eyr:" year:year() { b.expiration_year = Some(year) }
+                rule eyr(b: &mut PassportBuilder<'input>) -> ()
+                    = "eyr:" year:year((2020..=2030)) { b.expiration_year = Some(year); }
 
                 rule hgt(b: &mut PassportBuilder<'input>)
-                    = "hgt:" height:length() { b.height = Some(height) }
+                    = "hgt:" height:length() {?
+                        match &height {
+                        Height::Cm(v) if !(150..=193).contains(v) => {
+                            Err("bad height (cm)")
+                        },
+                        Height::In(v) if !(59..=76).contains(v) => {
+                            Err("bad height (in")
+                        },
+                        _ => {
+                            b.height = Some(height);
+                            Ok(())
+                        },
+                    }
+                }
 
                 rule pid(b: &mut PassportBuilder<'input>)
-                    = "pid:" id:id() { b.passport_id = Some(id) }
+                    = "pid:" id:$(['0'..='9']*<9,9>) { b.passport_id = Some(ID(id)) }
 
                 rule cid(b: &mut PassportBuilder<'input>)
-                    = "cid:" id:id() { b.country_id = Some(id) }
+                    = "cid:" id:$((!separator()[_])+) { b.country_id = Some(ID(id)) }
 
                 rule hcl(b: &mut PassportBuilder<'input>)
-                    = "hcl:" color:color() { b.hair_color = Some(color) }
+                    = "hcl:" color:hcl0() { b.hair_color = Some(color) }
+
+                rule hcl0() -> Color<'input>
+                    = s:$("#" ['0'..='9' | 'a'..='f']*<6,6>) {Color(s)}
 
                 rule ecl(b: &mut PassportBuilder<'input>)
-                    = "ecl:" color:color() { b.eye_color = Some(color) }
+                    = "ecl:" color:ecl0() { b.eye_color = Some(color) }
 
-                rule year() -> Year
-                    = num:num() { Year(num) }
+                rule ecl0() -> Color<'input>
+                    = s:$("amb" / "blu" / "brn" / "gry" / "grn" / "hzl" / "oth") {Color(s)}
+
+                rule year(range: RangeInclusive<u64>) -> Year
+                    = num:num() { ?
+                        if range.contains(&num) {
+                        Ok(Year(num))
+                    } else {
+                        Err("year out of range")
+                    }}
 
                 // [_] matches anything
                 rule color() -> Color<'input>
@@ -163,18 +190,17 @@ impl<'a> PassportBuilder<'a> {
                     = s:$(['0'..='9' | 'a'..='z' | '#']+) { ID(s) }
             }
         }
-        parser::root(input, &mut b).unwrap_or_else(|e| panic!(
-            "Could not parse {}: {}", input, e
-        ));
-        b
+        parser::root(input, &mut b)
+            .map_err(|e| Error::ParseError(input.into(), e.to_string()))?;
+        Ok(b)
     }
 }
 
 fn main() {
     let results = include_str!("input.txt")
         .split("\n\n")
-        .map(PassportBuilder::parse)
-        .map(PassportBuilder::build);
+        .map(|input| PassportBuilder::parse(input)
+            .and_then(|b| b.build()));
 
     let num_valid = results.filter(Result::is_ok).count();
     println!("{} passport records are valid.", num_valid);
